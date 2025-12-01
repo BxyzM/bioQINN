@@ -121,7 +121,7 @@ class QuantumClassifier:
                 inputs = np.squeeze(inputs, axis=0)
             else:
                 # For batch_size > 1, process first sample
-                # User should handle batching at a higher level
+                # TODO: Extend to full batch processing, PennyLane should be able to handle this shit nowadays 
                 logger.warning(f"Batch size > 1 detected ({inputs.shape[0]}), processing first sample only")
                 inputs = inputs[0]
         
