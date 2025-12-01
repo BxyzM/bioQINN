@@ -131,13 +131,27 @@ def create_dataloader(
 if __name__ == "__main__":
     import tempfile
     import shutil
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Test protein complex dataloader")
+    parser.add_argument(
+        "--path",
+        type=str,
+        default=None,
+        help="Path to directory containing .npy files. If not provided, creates dummy data."
+    )
+    parser.add_argument("--batch-size", type=int, default=3, help="Batch size for testing")
+    args = parser.parse_args()
     
     logger.info("Starting dataloader test")
     
-    # Create temporary directory with dummy data
-    temp_dir = Path(tempfile.mkdtemp())
-    
-    try:
+    if args.path is None:
+        # Create temporary directory with dummy data
+        temp_base = Path("/tmp/abal")
+        temp_base.mkdir(parents=True, exist_ok=True)
+        temp_dir = Path(tempfile.mkdtemp(dir=temp_base))
+        cleanup_required = True
+        
         # Create dummy .npy files
         N, C = 64, 5
         num_files = 10
@@ -151,11 +165,17 @@ if __name__ == "__main__":
         np.save(temp_dir / "resname_sample.npy", dummy_resname)
         
         logger.info(f"Created {num_files} dummy files in {temp_dir}")
-        
+        test_path = str(temp_dir)
+    else:
+        test_path = args.path
+        cleanup_required = False
+        logger.info(f"Using provided path: {test_path}")
+    
+    try:
         # Test with list of paths
         dataloader = create_dataloader(
-            paths=[str(temp_dir)],
-            batch_size=3,
+            paths=[test_path],
+            batch_size=args.batch_size,
             shuffle=False
         )
         
@@ -165,21 +185,24 @@ if __name__ == "__main__":
         # Iterate and print batch shapes
         for batch_idx, batch in enumerate(dataloader):
             logger.info(f"Batch {batch_idx}: shape {batch.shape}, dtype {batch.dtype}")
-            if batch_idx == 2:
-                break
+            #if batch_idx == 2:
+            #    break
         
         # Test with dict of paths
         dataloader_dict = create_dataloader(
-            paths={"1BRS_A_D": str(temp_dir)},
-            batch_size=1
+            paths={"test_interaction": test_path},
+            batch_size=args.batch_size,
+            shuffle=False
         )
         
         first_batch = next(iter(dataloader_dict))
         logger.info(f"Single batch shape: {first_batch.shape}")
         
         logger.info("Dataloader test completed successfully")
-        
+    except Exception as e:
+        logger.error(f"Error during dataloader test: {e}")    
     finally:
-        # Cleanup
-        shutil.rmtree(temp_dir)
-        logger.info("Cleaned up temporary directory")
+        # Cleanup only if dummy data was created
+        if cleanup_required:
+            shutil.rmtree(temp_dir)
+            logger.info("Cleaned up temporary directory")
