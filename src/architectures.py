@@ -13,7 +13,7 @@ from typing import Callable, Optional, Tuple, Any, List
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from loguru import logger
-
+import time
 
 class QuantumClassifier:
     """
@@ -59,7 +59,10 @@ class QuantumClassifier:
         self.all_wires = list(range(self.n_qubits))
         self.approx = approx
         self.use_aux_wire = use_aux_wire
-        
+        if self.approx is not None:
+            logger.info(f"Using approximation method for metric tensor: {self.approx}")
+            logger.warning("Approximation will absolutely affect accuracy of Fisher information calculations, there is no point of this calculation if only diagonal (self-correlation) elements are computed. Press Ctrl+C to abort now if you did not intend this.")
+            time.sleep(5)
         # Auxiliary wire for metric tensor computation
         if self.use_aux_wire:
             self.aux_wire = self.n_qubits
