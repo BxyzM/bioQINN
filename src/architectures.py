@@ -118,15 +118,11 @@ class QuantumClassifier:
             Expectation value of Pauli-Z measurement on wire 0
         """
         # Handle batch dimension
-        if inputs.ndim == 4:
-            if inputs.shape[0] == 1:
+        if inputs.shape[0] == 1:
                 # Remove batch dimension: (1,N,N,F) -> (N,N,F)
                 inputs = np.squeeze(inputs, axis=0)
-            else:
-                # For batch_size > 1, process first sample
-                # TODO: Extend to full batch processing, PennyLane should be able to handle this shit nowadays 
-                logger.warning(f"Batch size > 1 detected ({inputs.shape[0]}), processing first sample only")
-                inputs = inputs[0]
+                # TODO: Extend to full batch processing, PennyLane should be able to handle this shit nowadays
+                # UPDATE: Will be handled in the custom encoding/entanglement layers 
         
         # Apply encoding (data -> quantum state)
         if self.encoding is not None:
