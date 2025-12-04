@@ -7,7 +7,7 @@ seed: "QML_Protein_Complex_Seed_001"
 # Directory paths
 directories:
   native_path: '/ceph/abal/piston/work_dir_2/data_preparation/'
-  docked_path: '/ceph/abal/piston/work_dir_2/data_preparation/docked/PROTEIN_NAME'
+  docked_path: '/ceph/abal/piston/work_dir_2/data_preparation/docked/PROTEIN_NAME/'
   output_path: '/ceph/abal/piston/QML/model_training/outputs/'
   base_data: '/ceph/abal/piston/work_dir_2/data_preparation/'
   models: '/ceph/abal/piston/QML/model_training/outputs/'
@@ -33,6 +33,7 @@ data:
   
   # Data split configuration
   train_val_split: 0.8
+  neg_pos_ratio: 4
   use_separate_paths: false
   train_path: null
   val_path: null
@@ -137,6 +138,7 @@ hardware:
 # Reproducibility settings
 reproducibility:
   deterministic: true
+  seed_value: 42
   benchmark: false
   cudnn_deterministic: true
 
