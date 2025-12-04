@@ -1,30 +1,39 @@
 import pennylane.numpy as pnp
 import pandas as pd
 
-def CAPRI_label(metric_df:pd.DataFrame,thresholds:dict={'high':0.5,'medium':1.0,'acceptable':5.0}) -> pd.Series:
+def CAPRI_label(metric_df:pd.DataFrame,thresholds:dict={'high':0.5,'medium':1.0,'acceptable':5.0}, return_tags:bool=False) -> pd.Series:
     '''Assigns CAPRI quality labels based on provided metrics DataFrame.
     Args:
         metric_df (pd.DataFrame): DataFrame with columns 'fnat', 'l_rms', 'i_rms'.
         thresholds (dict): Thresholds for high, medium, acceptable quality.
+        return_tags (bool): Whether to return the tags along with labels.
     Returns:
+        List[str]: List of CAPRI quality tags if return_tags is True.
         pnp.ndarray: Array of CAPRI quality labels.
     '''
     labels = []
+    tags = []
     for _, row in metric_df.iterrows():
         fnat = row['fnat']
         l_rms = row['l_rms']
         i_rms = row['i_rms']
         
         if fnat >= thresholds['high'] and l_rms <= 1.0 and i_rms <= 1.0:
-            labels.append('high')
+            tags.append('high')
+            labels.append(1.0)
         elif fnat >= thresholds['medium'] and l_rms <= 5.0 and i_rms <= 2.0:
-            labels.append('medium')
+            tags.append('medium')
+            labels.append(1.0)
         elif fnat >= thresholds['acceptable'] and l_rms <= 10.0 and i_rms <= 4.0:
+            tags.append('acceptable')
             labels.append(1.0)
         else:
+            tags.append('incorrect')
             labels.append(0.0)
     
     # Convert to numpy array with gradient tracking and then return
+    if return_tags:
+        return pnp.array(labels, requires_grad=True), tags
     return pnp.array(labels, requires_grad=True)
 
 def DockQ_score(metric_df:pd.DataFrame, d1:float = 8.5, d2:float = 1.5) -> pnp.ndarray:
