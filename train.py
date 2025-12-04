@@ -69,14 +69,13 @@ def setup_wandb(cfg):
         logger.error(f"W&B initialization failed: {e}")
         return None
 
-def create_optimizer(cfg, initial_weights):
+def create_optimizer(cfg):
     """
     Create PennyLane optimizer based on config.
     
     Args:
         cfg: Configuration object with optimizer settings
-        initial_weights: Initial circuit parameters
-        
+    
     Returns:
         Configured optimizer instance
     """
@@ -221,7 +220,7 @@ def main():
     # Create output directories
     output_dir = get_output_paths(
         output_dir=cfg.directories.models,
-        seed=cfg.seed
+        seed=cfg.seed # not the determinism seed, this one is just for tracking
     )
     logger.info(f"Output directory: {output_dir}")
     
@@ -234,7 +233,7 @@ def main():
     
     # Initialize circuit weights
     logger.info("Initializing circuit weights...")
-    initial_weights = initialize_weights(cfg, seed=cfg.seed)
+    initial_weights = initialize_weights(cfg, seed=cfg.determinism.seed_value)
     
     # Create quantum classifier
     logger.info("Creating quantum classifier...")
