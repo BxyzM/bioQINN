@@ -20,6 +20,7 @@ import numpy as np
 from loguru import logger
 import pennylane as qml
 from pennylane import numpy as pnp
+import src.losses as losses
 
 # Add current directory to Python path for imports
 sys.path.insert(0, str(Path(__file__).parent.absolute()))
@@ -67,66 +68,6 @@ def setup_wandb(cfg):
     except Exception as e:
         logger.error(f"W&B initialization failed: {e}")
         return None
-
-
-def create_loss_function(loss_type: str):
-    """
-    Factory function for loss functions.
-    
-    Args:
-        loss_type: Type of loss ('MSE', 'BCE', etc.)
-        
-    Returns:
-        Loss function callable
-    """
-    def quantum_loss(weights, inputs, labels, quantum_circuit, return_scores=False, loss_type='MSE'):
-        """
-        Quantum circuit loss function.
-        
-        Args:
-            weights: Circuit parameters
-            inputs: Input data batch
-            labels: Ground truth labels
-            quantum_circuit: QNode for circuit execution
-            return_scores: Whether to return predictions
-            loss_type: Loss function type
-            
-        Returns:
-            Loss value or (loss, scores) tuple
-        """
-        # Handle batch dimension
-        if inputs.ndim == 3:
-            inputs = inputs[np.newaxis, ...]
-        
-        batch_size = inputs.shape[0]
-        predictions = []
-        
-        # Execute circuit for each sample
-        for i in range(batch_size):
-            sample = inputs[i:i+1]
-            pred = quantum_circuit(weights, sample)
-            predictions.append(pred)
-        
-        predictions = np.array(predictions)
-        
-        # Compute loss
-        if loss_type == 'MSE':
-            loss = np.mean((predictions - labels) ** 2)
-        elif loss_type == 'BCE':
-            # Binary cross-entropy with clipping for stability
-            predictions = np.clip(predictions, 1e-7, 1 - 1e-7)
-            loss = -np.mean(labels * np.log(predictions) + (1 - labels) * np.log(1 - predictions))
-        elif loss_type == 'MAE':
-            loss = np.mean(np.abs(predictions - labels))
-        else:
-            raise ValueError(f"Unknown loss type: {loss_type}")
-        
-        if return_scores:
-            return loss, predictions
-        return loss
-    
-    return quantum_loss
-
 
 def create_optimizer(cfg, initial_weights):
     """
@@ -324,7 +265,7 @@ def main():
     
     # Create loss function
     logger.info("Creating loss function...")
-    loss_fn = create_loss_function(cfg.loss.type)
+    loss_fn = losses.quantum_loss
     
     # Create trainer
     logger.info("Creating trainer...")
