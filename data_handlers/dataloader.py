@@ -76,13 +76,20 @@ class ProteinComplexDataset(Dataset):
     
     def _normalize_paths(self) -> Dict[str, str]:
         """Convert paths to dict format for uniform handling."""
+        
+        for path in self.paths if isinstance(self.paths, list) else self.paths.values():
+            if Path(path).suffix == '.csv':
+                raise ValueError("CSV files are not supported in this dataloader.")
         if isinstance(self.paths, dict):
             return self.paths
         elif isinstance(self.paths, list):
             return {f"path_{i}": p for i, p in enumerate(self.paths)}
         else:
             raise TypeError("paths must be list or dict")
-    
+        # check if at least one path points to a csv file
+        
+            
+            
     def __len__(self) -> int:
         """Return number of samples."""
         return len(self.data)
