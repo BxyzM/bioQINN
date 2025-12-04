@@ -25,6 +25,7 @@ Work in Progress. Readme gets updated over time.
 ### Important Scripts
 
 - `src/architectures.py` : contains the quantum circuit architecture, adapted from the original 1P1Q implementation. Major change: the encoding, entanglement and trainable Clifford gate operations are now user-supplied instead of being hardcoded. 
-- `src/trainer.py` : contains a general framework for training quantum circuits. 
-- `data_handlers/dataloader.py` : dataloader that fetches the data (expects `.npy` files) given a path and batches it efficiently. This can be tested as well by calling the script with the optional argument `--path`, without which it uses dummy data for a demonstration. 
-`data_handers/file_paths.py` : single script that can be modified by the user to define all possible directories such as the location of the inputs, where to save the output to, and so on. This script probably evolves with time. 
+- `src/trainer.py` : contains a general framework for training quantum circuits.
+- `models/operations.py`: contains the modular definitions of the encoding, entanglement and rotation operations. A copy of this script is made for each run and preserved as part of the model, since without this, one cannot reconstruct the correct model for inference. 
+- `data_handlers/dataloader.py` : dataloader that fetches the data (expects `.npy` files) given a path to a YAML config file and batches the resultant data efficiently. This can be tested by calling the script, also with the optional argument `--path`, without which it uses dummy data for a demonstration. 
+- `train.py`: single script for training the QML classifier/regressor. 
