@@ -9,7 +9,7 @@
 
 Theory/bio paper from [Nat. Mach. Intel](https://www.nature.com/articles/s42256-023-00715-4).
 
-Work in Progress. Readme gets updated over time.
+Work in Progress. This README gets updated over time.
 
 ------
 
