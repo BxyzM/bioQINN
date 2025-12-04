@@ -5,11 +5,7 @@ Date: 27 November 2025
 """
 import os, pathlib, datetime,loguru
 
-base_directory = '/ceph/abal/piston/work_dir/data_preparation/'
-dock_directory = '/ceph/abal/piston/work_dir/data_preparation/docked'
-output_directory = '/ceph/abal/piston/QML/model_training/outputs/'
-
-def fetch_subfolders(base_dir: str=base_directory) -> dict:
+def fetch_subfolders(base_dir: str='/ceph/abal/piston/work_dir_2/data_preparation/') -> dict:
     '''Fetches subfolder paths for raw PDBs and grid maps.
         Args:
             base_dir (str): Base directory to fetch subfolders from.
@@ -20,10 +16,11 @@ def fetch_subfolders(base_dir: str=base_directory) -> dict:
     sub_folders = {
         'raw': os.path.join(base_dir, '00-raw_pdbs'),
         'grid_maps': os.path.join(base_dir, '07-grid'),
+        'metrics': os.path.join(base_dir, 'irmsd.csv')
     }
     return sub_folders
 
-def get_output_paths(output_dir: str=output_directory,seed: str = None) -> str:
+def get_output_paths(output_dir: str='/ceph/abal/piston/QML/model_training/outputs/',seed: str = None) -> str:
     '''Generates an output path based on the provided seed or current datetime.
         Args:
             output_dir (str): Base directory for outputs.
