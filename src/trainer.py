@@ -31,71 +31,62 @@ class QuantumTrainer:
     
     Args:
         model: QuantumClassifier instance to train
-        lr: Learning rate for optimizer
+        cfg: Configuration object containing all training parameters
         optimizer: Optimizer instance with step_and_cost method
         loss_fn: Loss function with signature (weights, inputs, labels, quantum_circuit, ...)
-        save: Whether to save model checkpoints
-        train_max_n: Maximum number of training samples per epoch
-        valid_max_n: Maximum number of validation samples per epoch
-        epochs: Number of training epochs
-        patience: Number of LR decay steps before early stopping
-        improv: Minimum improvement threshold for early stopping
-        wandb: Weights & Biases run instance for logging
-        lr_decay: Whether to enable learning rate decay
-        loss_type: Loss function type identifier
-        **kwargs: Additional arguments (batch_size, init_weights, logger)
+        wandb: Weights & Biases run instance for logging (optional)
+        init_weights: Initial circuit weights (optional, can be in cfg or passed directly)
     """
     
     def __init__(
         self,
         model: Any,
-        lr: float = 0.001,
-        optimizer: Optional[Callable] = None,
-        loss_fn: Optional[Callable] = None,
-        save: bool = True,
-        train_max_n: int = 10000,
-        valid_max_n: int = 2000,
-        epochs: int = 20,
-        patience: int = 2,
-        improv: float = 0.01,
+        cfg: Any,
+        optimizer: Callable,
+        loss_fn: Callable,
         wandb: Optional[Any] = None,
-        lr_decay: bool = False,
-        loss_type: str = 'MSE',
-        **kwargs: Any
+        init_weights: Optional[np.ndarray] = None
     ) -> None:
         self.model = model
         self.circuit = model.fetch_circuit()
         self.backend = model.backend
+        self.cfg = cfg
         
-        # Training parameters
-        self.init_weights = kwargs.get('init_weights')
-        self.batch_size = kwargs.get('batch_size', 1000)
-        self.custom_logger = kwargs.get('logger')
+        # Extract training parameters from config
+        self.batch_size = cfg.training.batch_size
+        self.lr_decay = cfg.training.lr_decay
+        self.epochs = cfg.training.epochs
+        self.patience = cfg.training.patience
+        self.saving = cfg.training.save_checkpoints
+        self.loss_type = cfg.loss.type
+        self.improv = cfg.training.improv
         
-        # Training configuration
-        self.train_max_n = train_max_n
-        self.valid_max_n = valid_max_n
-        self.lr_decay = lr_decay
-        self.epochs = epochs
-        self.patience = patience
-        self.saving = save
-        self.loss_type = loss_type
-        self.improv = improv
-        self.wandb = wandb
+        # Early stopping configuration
+        self.min_epochs = cfg.training.get('min_epochs', 4)
+        self.improvement_window = cfg.training.get('improvement_window', 2)
+        
+        # Learning rate
+        self.lr = cfg.optimizer.learning_rate
         
         # Training state
+        self.init_weights = init_weights
         self.current_weights = self.init_weights
         self.current_epoch = 0
         self.optim = optimizer
         self.quantum_loss = loss_fn
+        self.wandb = wandb
         self.history: Dict[str, List[float]] = {'train': [], 'val': [], 'auc': []}
         
         # Directories
         self.save_dir: Optional[str] = None
         self.checkpoint_dir: Optional[str] = None
         
-        logger.info(f'Optimizer: {self.optim} | Learning rate: {lr}')
+        logger.info(f'Optimizer: {self.optim.__class__.__name__} | Learning rate: {self.lr}')
         logger.info(f'Backend: {self.backend}')
+        logger.info(f'Training config: epochs={self.epochs}, batch_size={self.batch_size}, '
+                   f'patience={self.patience}, lr_decay={self.lr_decay}')
+        logger.info(f'Early stopping: min_epochs={self.min_epochs}, '
+                   f'improvement_window={self.improvement_window}, improv_threshold={self.improv}')
     
     def iteration(
         self,
@@ -210,6 +201,59 @@ class QuantumTrainer:
         plt.tight_layout()
         return fig
     
+    def _check_early_stopping(self, n_epoch: int, n_decays: int, last_decay: int) -> Tuple[bool, int, int]:
+        """
+        Check early stopping criteria based on validation metrics.
+        
+        Args:
+            n_epoch: Current epoch number
+            n_decays: Number of learning rate decays performed
+            last_decay: Epoch at which last decay occurred
+            
+        Returns:
+            Tuple of (should_stop, updated_n_decays, updated_last_decay)
+        """
+        # Only check after minimum epochs have passed
+        if n_epoch <= self.min_epochs:
+            return False, n_decays, last_decay
+        
+        # Ensure we have enough history for comparison
+        if len(self.history['auc']) < (self.improvement_window + 1):
+            return False, n_decays, last_decay
+        
+        # Calculate improvement over the improvement window
+        recent_val_metrics = self.history['auc'][-self.improvement_window:]
+        previous_val_metric = self.history['auc'][-(self.improvement_window + 1)]
+        improvement = np.mean(recent_val_metrics) - previous_val_metric
+        
+        if improvement < self.improv:
+            if self.lr_decay:
+                # Check if we should decay learning rate
+                epochs_since_decay = n_epoch - last_decay
+                if (n_decays < self.patience) and (epochs_since_decay >= self.improvement_window):
+                    last_decay = n_epoch
+                    n_decays += 1
+                    self.optim.stepsize *= 0.5
+                    logger.info(
+                        f'No improvement observed. Learning rate decayed to '
+                        f'{self.optim.stepsize:.6f} at epoch {n_epoch} '
+                        f'(decay {n_decays}/{self.patience})'
+                    )
+                    return False, n_decays, last_decay
+                elif n_decays >= self.patience:
+                    logger.info(
+                        f"Early stopping after {self.patience} decay steps with no improvement"
+                    )
+                    return True, n_decays, last_decay
+            else:
+                logger.info(
+                    f"Early stopping: no improvement over last {self.improvement_window} epochs "
+                    f"(threshold: {self.improv})"
+                )
+                return True, n_decays, last_decay
+        
+        return False, n_decays, last_decay
+    
     def run_training_loop(
         self,
         train_loader: DataLoader,
@@ -219,8 +263,8 @@ class QuantumTrainer:
         Execute complete training loop with validation and early stopping.
         
         Args:
-            train_loader: DataLoader for training data
-            val_loader: DataLoader for validation data
+            train_loader: DataLoader for training data (yields data, labels, scores, tags)
+            val_loader: DataLoader for validation data (yields data, labels, scores, tags)
             
         Returns:
             Dictionary containing training history
@@ -237,43 +281,24 @@ class QuantumTrainer:
             losses = 0.0
             
             # Early stopping check
-            if n_epoch > 4:
-                recent_val_metrics = self.history['auc'][-2:]
-                previous_val_metric = self.history['auc'][-3]
-                improvement = np.mean(recent_val_metrics) - previous_val_metric
-                
-                if improvement < self.improv:
-                    if self.lr_decay:
-                        if (n_decays < self.patience) and ((n_epoch - last_decay) >= 2):
-                            last_decay = self.current_epoch
-                            n_decays += 1
-                            self.optim.stepsize *= 0.5
-                            logger.info(
-                                f'No improvement observed. Learning rate decayed to '
-                                f'{self.optim.stepsize} at epoch {n_epoch}'
-                            )
-                        elif n_decays >= self.patience:
-                            logger.info(
-                                f"Early stopping after {self.patience} decay steps with no improvement"
-                            )
-                            self.save(self.save_dir, name='trained_model.pickle')
-                            complete = True
-                            break
-                    else:
-                        logger.info("Early stopping: no improvement over last 3 epochs")
-                        self.save(self.save_dir, name='trained_model.pickle')
-                        complete = True
-                        break
+            should_stop, n_decays, last_decay = self._check_early_stopping(
+                n_epoch, n_decays, last_decay
+            )
+            
+            if should_stop:
+                self.save(self.save_dir, name='trained_model.pickle')
+                complete = True
+                break
             
             # Training phase
             if n_epoch > 0:
                 logger.info("Starting training phase")
                 start_time = time.time()
                 
-                for data, labels in tqdm(
+                for data, labels, _, _ in tqdm(
                     train_loader,
                     desc=f"Epoch {n_epoch} training",
-                    total=int(self.train_max_n / self.batch_size)
+                    total=int(len(train_loader.dataset) / self.batch_size)
                 ):
                     sample_counter += data.shape[0]
                     batch_yield += 1
@@ -300,10 +325,10 @@ class QuantumTrainer:
             all_val_scores = []
             all_val_labels = []
             
-            for data, labels in tqdm(
+            for data, labels, _, _ in tqdm(
                 val_loader,
                 desc=f"Epoch {n_epoch} validation",
-                total=int(self.valid_max_n / self.batch_size)
+                total=int(len(val_loader.dataset) / self.batch_size)
             ):
                 loss, scores = self.iteration(data, labels=labels, train=False)
                 val_loss += loss
@@ -368,12 +393,18 @@ class QuantumTrainer:
             # Save checkpoints
             if self.saving:
                 name = None
+                checkpoint_frequency = self.cfg.training.get('checkpoint_frequency', 5)
+                
                 if n_epoch == self.epochs:
                     name = 'trained_model.pickle'
                 elif n_epoch == 0:
                     name = 'init_weights.pickle'
+                elif n_epoch % checkpoint_frequency == 0:
+                    # Save periodic checkpoints
+                    name = None  # Will use epoch-based naming
                 
-                self.save(self.save_dir, name=name)
+                if name is not None or n_epoch % checkpoint_frequency == 0:
+                    self.save(self.save_dir, name=name)
         
         # Save final history
         if not complete and self.save_dir is not None:
@@ -395,7 +426,7 @@ class QuantumTrainer:
         if prefix is not None:
             logger.info(prefix)
         logger.info(f'Weights shape: {self.current_weights.shape}')
-        logger.info(f'Weights: {self.current_weights}')
+        logger.info(f'Weights (first 5): {self.current_weights.flatten()[:5]}...')
     
     def save(self, save_dir: str, name: Optional[str] = None) -> None:
         """
@@ -420,7 +451,7 @@ class QuantumTrainer:
                 opt_name = f'optimizer_ep{self.current_epoch:02}.json'
         
         # Determine save location
-        if 'trained' not in name:
+        if 'trained' not in name and 'init' not in name:
             target_dir = self.checkpoint_dir
         else:
             target_dir = save_dir
