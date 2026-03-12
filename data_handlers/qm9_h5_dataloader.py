@@ -12,7 +12,7 @@ import numpy as np
 from torch.utils.data import Dataset, DataLoader, Subset
 from loguru import logger
 from typing import Any, Tuple, Union, List
-
+import pennylane.numpy as pnp
 try:
     import pennylane.numpy as pnp
     _PNP_AVAILABLE = True
@@ -56,7 +56,7 @@ class QM9HDF5Dataset(Dataset):
 
     def __getitem__(
         self, idx: int
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> Tuple[pnp.ndarray, pnp.ndarray, pnp.ndarray, pnp.ndarray]:
         """
         Returns:
             node_features : (max_nodes, 7)
@@ -65,10 +65,10 @@ class QM9HDF5Dataset(Dataset):
             n_atoms       : (2,)  [total, heavy]
         """
         with h5py.File(self.path, "r") as f:
-            nodes   = torch.from_numpy(f["node_features"][idx])
-            edges   = torch.from_numpy(f["edge_features"][idx])
-            targets = torch.from_numpy(f["targets"][idx][self.target_indices])
-            n_atoms = torch.from_numpy(f["n_atoms"][idx])
+            nodes   = pnp.array(f["node_features"][idx])
+            edges   = pnp.array(f["edge_features"][idx])
+            targets = pnp.array(f["targets"][idx][self.target_indices])
+            n_atoms = pnp.array(f["n_atoms"][idx])
 
         if targets.shape[0] == 1:
             targets = targets.squeeze(0)
