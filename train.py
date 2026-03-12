@@ -44,6 +44,9 @@ def main() -> None:
     logger.info(f"Configuration loaded from {args.config}")
     logger.info(f"Model directory: {model_dir}")
     config.save(model_dir / "config.yaml")
+    import subprocess
+    subprocess.run(["cp", "quantum/architectures.py", model_dir / "architectures.py"])
+    subprocess.run(["cp", "quantum/trainer.py", model_dir / "trainer.py"])
     
     # ------------------------------------------------------------------
     # Data
@@ -65,25 +68,42 @@ def main() -> None:
     # Circuit
     # ------------------------------------------------------------------
     circuit = QuantumCircuit(config, device)
+    if config.loss.name == "mae":
+        loss_fn = circuit.loss
+    elif config.loss.name == "mse":
+        loss_fn = circuit.mse_loss
+    elif config.loss.name == "huber":
+        loss_fn = circuit.huber_loss
+    else:
+        raise ValueError(f"Unsupported loss function: {config.loss.name}")
 
     # ------------------------------------------------------------------
     # Optimizer
     # ------------------------------------------------------------------
-    # Only Adam is supported for now; the name field is informational.
-    if config.optimizer.name != "Adam":
+    optimizer_dict = {
+        "adam": qml.AdamOptimizer,
+        "sgd": qml.GradientDescentOptimizer,
+        "gradientdescent": qml.GradientDescentOptimizer,
+        "adagrad": qml.AdagradOptimizer,
+    }
+    if config.optimizer.name.lower() not in optimizer_dict.keys():
         logger.warning(
             f"Optimizer '{config.optimizer.name}' is not implemented; "
             f"falling back to AdamOptimizer."
         )
-    optimizer = qml.AdamOptimizer(stepsize=config.optimizer.lr)
-    logger.info(f"Optimizer: AdamOptimizer | lr={config.optimizer.lr}")
+    if config.optimizer.name.lower() == "sgd":
+        logger.warning(
+            f"Pennylane has no true Stochastic Gradient Descent (SGD) optimizer; using GradientDescentOptimizer instead. Batch size > 1 will not have the intended effect of SGD. Your current batch size is {config.setup.batch_size}."
+        )
+    optimizer = optimizer_dict.get(config.optimizer.name.lower())(stepsize=config.optimizer.lr)
+    logger.info(f"Optimizer: {config.optimizer.name} | lr (step size)={config.optimizer.lr}")
 
     # ------------------------------------------------------------------
     # Train
     # ------------------------------------------------------------------
-    trainer = QuantumTrainer(config, circuit, optimizer, train_loader, val_loader, model_dir)
+    trainer = QuantumTrainer(config, circuit, loss_fn, optimizer, train_loader, val_loader, model_dir)
     history = trainer.train()
-
+    # copy architecture to save dir. This is important for reproducibility and future inference.
     logger.info(
         f"Run '{config.setup.run_id}' complete | "
         f"best val_mae={min(history['val_mae']):.4f} (norm)"
