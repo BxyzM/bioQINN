@@ -1,6 +1,6 @@
 # bioQINN: Regressing Molecular Structure with Quantum Machine Learning
 
-**Authors:** [Aritra Bal](https://etpwww.etp.kit.edu/~abal/), Benedikt Maier, Michael Spannowsky
+**Authors:** [Aritra Bal](https://etpwww.etp.kit.edu/~abal/) 
 
 **Contact:** [Email](mailto:aritra.bal@do-not-spam.kit.edu)
 
