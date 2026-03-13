@@ -1,4 +1,4 @@
-# bioQINN: Regressing Molecular Structure with Quantum Machine Learning
+# Regressing Molecular Structure with Quantum Machine Learning
 
 **Authors:** [Aritra Bal](https://etpwww.etp.kit.edu/~abal/) 
 
@@ -12,9 +12,9 @@ Dataset description paper: [Ramakrishnan et al., *Scientific Data* (2014)](https
 
 ## Overview
 
-**bioQINN** is a quantum graph neural network for molecular property prediction on the [QM9](https://www.nature.com/articles/sdata201422) dataset. The primary regression target is the **HOMO-LUMO gap** — the energy difference Δε between the **Highest Occupied Molecular Orbital (HOMO)** and the **Lowest Unoccupied Molecular Orbital (LUMO)** — a quantity of central importance in computational chemistry, governing optical absorption, reactivity, and charge transport properties.
+We use a quantum neural network, a variational quantum circuit so as to say, for molecular property prediction on the [QM9](https://www.nature.com/articles/sdata201422) dataset. The primary regression target is the **HOMO-LUMO gap** — the energy difference Δε between the **Highest Occupied Molecular Orbital (HOMO)** and the **Lowest Unoccupied Molecular Orbital (LUMO)**. This is a quantity of some importance in computational chemistry, often used as a benchmark within the larger ML and Chemistry communities.
 
-The data embedding strategy is inspired by the **1P1Q architecture** developed for jet tagging and anomaly detection in high-energy physics [Bal et al., Phys. Rev. D 112, 2025](https://link.aps.org/doi/10.1103/l8y2-87vq). Details of the encoding, entanglement, and measurement schemes are documented directly in `quantum/architectures.py`.
+The data embedding strategy is inspired by the **1P1Q architecture** developed for jet tagging and anomaly detection developed by us [Bal et al., Phys. Rev. D 112, 2025](https://link.aps.org/doi/10.1103/l8y2-87vq). Details of the encoding, entanglement, and measurement schemes are documented directly in `quantum/architectures.py` and will not be described here at this point.
 
 ---
 
@@ -124,17 +124,6 @@ Outputs are written to `<model_dir>/<run_id>/` and include:
 - `trained_model/weights_best.npy` — weights at best validation MAE
 - `trained_model/weights_final.npy` — weights at end of training
 - `predictions.png` / `scatter_plotpredictions.png` — validation diagnostics
-
----
-
-## Circuit Architecture
-
-The variational circuit follows an **encode → entangle → variational layers → measurement** structure:
-
-1. **Encoding** (`_encode_atomID`): Atom identity is encoded via trainable element-specific RY rotations applied through `AngleEmbedding`.
-2. **Entanglement** (`_entangle`): Pairwise IsingXX, IsingYY, and IsingZZ gates are applied over bonded heavy-atom pairs, parameterised by interatomic distance and bond type.
-3. **Variational layers** (`_trainable_layers`): Each layer applies a full `Rot(α, β, γ)` (ZYZ decomposition) on every qubit.
-4. **Measurement** (`_trainable_measurement` + Hamiltonian): A trainable basis rotation precedes measurement of a weighted sum Hamiltonian over `read_qubits` qubits.
 
 ---
 
