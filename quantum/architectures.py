@@ -16,7 +16,10 @@ import pennylane as qml
 import pennylane.numpy as pnp
 from itertools import combinations
 from loguru import logger
-from typing import Any, Tuple
+from typing import TYPE_CHECKING, Any, Tuple
+from tqdm import tqdm
+if TYPE_CHECKING:
+    from torch.utils.data import DataLoader
 
 
 # Hartree to eV conversion factor
@@ -50,6 +53,7 @@ class QuantumCircuit:
         self.num_layers = config.model.num_layers
         self.operations_per_layer = config.model.operations_per_layer
         self.backend    = config.model.backend
+        self.device_name = config.model.device
         self.device     = device
         self.all_wires  = list(range(self.n_qubits))
         self.coeffs = []
@@ -239,16 +243,10 @@ class QuantumCircuit:
         Args:
             weights : (num_layers, n_qubits) trainable parameter array.
         """
-        # for (i, j) in self.two_comb_wires:
-        #     qml.CNOT(wires=[i, j])
+  
         for i in self.all_wires:
-            # qml.RZ(weights[layer, 0, i], wires=i)  # RZ-RY-RZ rotation
-            # qml.RY(weights[layer, 1, i], wires=i)  # RZ-RY-RZ rotation
-            # qml.RX(weights[layer, 2, i], wires=i)  # RX rotation
             qml.Rot(weights[layer, 0, i],weights[layer, 1, i], weights[layer, 2, i], wires=i)  # RZ-RY-RZ rotation
-            #qml.RX(weights[layer, 0, i], wires=i)  # RX rotation
-        # for (i, j) in self.two_comb_wires:
-        #     qml.CNOT(wires=[j, i])
+
     #------------------------------------------------------------------
     # QNode circuit function
     # ------------------------------------------------------------------
@@ -307,6 +305,43 @@ class QuantumCircuit:
         obs = [qml.PauliZ(i) for i in range(self.read_qubits)]
         H = qml.Hamiltonian(self.coeffs, obs)
         return qml.expval(H)
+    
+    def _state_circuit(
+        self,
+        weights: pnp.ndarray,
+        extra_weights: pnp.ndarray,
+        node_feat: np.ndarray,
+        edge_feat: np.ndarray,
+    ) -> Any:
+        """
+        Full variational circuit: encode -> entangle -> trainable -> measure.
+
+        Args:
+            weights   : (num_layers, n_qubits) trainable parameters.
+            node_feat : (max_nodes, 7) or (B, max_nodes, 7)
+            edge_feat : (max_nodes, max_nodes, 4) or (B, max_nodes, max_nodes, 4)
+
+        Returns:
+            Full statevector of the circuit (2**n_qubits complex amplitudes).
+        """
+        # Squeeze trivial batch dimension; PennyLane broadcasting handles B>1.
+        if node_feat.ndim == 3 and node_feat.shape[0] == 1:
+            node_feat = node_feat[0]
+            edge_feat = edge_feat[0]
+
+        batched = node_feat.ndim == 3
+
+        # Use only the first n_qubits atom rows (heavy atoms).
+        if batched:
+            node_feat = node_feat[:, :self.n_qubits, :]
+        else:
+            node_feat = node_feat[:self.n_qubits, :]
+        self._encode_atomID(node_feat, extra_weights, batched)
+        for layer in range(self.num_layers):
+            self._entangle(extra_weights, node_feat, edge_feat, batched, layer)
+            self._trainable_layers(weights, layer)
+        self._trainable_measurement(extra_weights)
+        return qml.state()
 
     # ------------------------------------------------------------------
     # Loss
@@ -407,3 +442,81 @@ class QuantumCircuit:
         logger.info("Extra Weights:")
         for key, value in zip(self.extra_weights_IDX.keys(), self.extra_weights):
             logger.info(f"  {key}: {value}")
+
+    # ------------------------------------------------------------------
+    # Quantum Fisher Information computation
+    # ------------------------------------------------------------------
+    def quantum_fisher(
+        self,
+        node_feat: np.ndarray,
+        edge_feat: np.ndarray,
+    ) -> np.ndarray:
+        """
+        Compute the Quantum Fisher Information Matrix (QFIM) for a single molecule.
+
+        Evaluates the metric tensor of a state-returning QNode with respect to
+        the trainable Rot-gate weights at fixed inputs (node_feat, edge_feat).
+        Returns the submatrix corresponding to the rotation parameters only
+        (shape: num_layers * 3 * n_qubits square).
+
+        Args:
+            node_feat : (n_qubits, 7) node feature array for a single molecule.
+            edge_feat : (max_nodes, max_nodes, 4) edge feature array
+                        (bond type, theta_ij, phi_ij, distance).
+
+        Returns:
+            np.ndarray of shape (num_layers * 3 * n_qubits, num_layers * 3 * n_qubits)
+            — the QFIM restricted to the Rot-gate parameters.
+        """
+        # The HDF5 dataloader can yield torch tensors when convert_pnp=False.
+        # Convert inputs here so the metric-tensor path uses the same interface
+        # as the trainable weights and does not mix torch and autograd tensors.
+        node_feat = pnp.array(np.asarray(node_feat), requires_grad=False)
+        edge_feat = pnp.array(np.asarray(edge_feat), requires_grad=False)
+        # The full metric tensor needs one auxiliary wire for Hadamard tests.
+        # Keep the configured shot count so QFIM estimation follows the same
+        # finite-shot execution mode as inference.
+        metric_device = qml.device(
+            self.device_name,
+            wires=self.n_qubits + 1,
+            shots=self.device.shots,
+        )
+        state_qnode = qml.QNode(
+            self._state_circuit,
+            metric_device,
+            interface=self.backend,
+            diff_method="best",
+        )
+        metric_fn = qml.metric_tensor(state_qnode, hybrid=False)
+        full_qfi = metric_fn(self.weights, self.extra_weights, node_feat, edge_feat)
+        # Extract submatrix for trainable Rot weights only (first num_layers*operations_per_layer*n_qubits params)
+        n_rot = self.num_layers * self.operations_per_layer * self.n_qubits
+        return full_qfi[:n_rot, :n_rot]
+        
+    def run_fisher_computation(
+        self,
+        dataloader: DataLoader,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Compute Fisher Information Matrix for each input point in the dataloader.
+        
+        Args:
+            dataloader: DataLoader containing input data and labels (batch_size=1)
+            
+        Returns:
+            Tuple of (fisher_matrices, labels) where:
+            - fisher_matrices: (N, Np, Np) array of Fisher Information Matrices
+            - labels: (N,) array of truth labels
+        """
+        fisher_matrices = []
+        all_labels = []
+
+        for node_feat, edge_feat, target, _ in tqdm(dataloader, desc="Computing Fisher Information"):
+            qfi = self.quantum_fisher(node_feat[0], edge_feat[0])
+            fisher_matrices.append(qfi)
+            all_labels.append(target[0])
+
+        fisher_matrices = np.array(fisher_matrices)  # (N, Np, Np)
+        all_labels = np.array(all_labels)            # (N,)
+
+        return fisher_matrices, all_labels
