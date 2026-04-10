@@ -50,14 +50,39 @@ def parse_args() -> argparse.Namespace:
 # ---------------------------------------------------------------------------
 
 def _load_weights(circuit: QuantumCircuit, weights_path: str) -> None:
-    """Load weights and extra_weights from .npy files saved by the trainer."""
+    """Load weights and extra_weights from .npy or .npz files saved by the trainer."""
     weights_path = pathlib.Path(weights_path)
     extra_path   = weights_path.parent / ("extra_" + weights_path.name)
 
-    circuit.weights       = qml.numpy.array(np.load(str(weights_path)),       requires_grad=True)
-    circuit.extra_weights = qml.numpy.array(np.load(str(extra_path)), requires_grad=True)
-    logger.info(f"Weights loaded from {weights_path}")
-    logger.info(f"Extra weights loaded from {extra_path}")
+    def _load_array(path: pathlib.Path) -> np.ndarray:
+        data = np.load(str(path))
+        if isinstance(data, np.lib.npyio.NpzFile):
+            # .npz archive: extract the first (and typically only) stored array
+            key = list(data.keys())[0]
+            arr = np.array(data[key])
+            data.close()
+            logger.warning(f"{path} is a .npz archive; extracted key '{key}'")
+            return arr
+        return np.array(data)
+
+    loaded_w  = _load_array(weights_path)
+    loaded_ew = _load_array(extra_path)
+
+    expected_w_shape  = circuit.weights.shape
+    expected_ew_shape = circuit.extra_weights.shape
+    if loaded_w.shape != expected_w_shape:
+        raise ValueError(
+            f"Weight shape mismatch: file={loaded_w.shape}, circuit expects={expected_w_shape}"
+        )
+    if loaded_ew.shape != expected_ew_shape:
+        raise ValueError(
+            f"Extra-weight shape mismatch: file={loaded_ew.shape}, circuit expects={expected_ew_shape}"
+        )
+
+    circuit.weights       = qml.numpy.array(loaded_w,  requires_grad=False)
+    circuit.extra_weights = qml.numpy.array(loaded_ew, requires_grad=False)
+    logger.info(f"Weights loaded from {weights_path}  shape={loaded_w.shape}")
+    logger.info(f"Extra weights loaded from {extra_path}  shape={loaded_ew.shape}")
 
 
 def _run_inference(circuit: QuantumCircuit, test_loader) -> tuple:
@@ -69,11 +94,15 @@ def _run_inference(circuit: QuantumCircuit, test_loader) -> tuple:
         edge_np   = np.asarray(edges)
         target_np = np.asarray(targets)
 
-        raw_pred  = circuit.qnode(circuit.weights, circuit.extra_weights, node_np, edge_np)
-        coeffs    = circuit.coeffs
-        bias      = np.sum(np.abs(np.array(coeffs)))
+        raw_pred     = circuit.qnode(circuit.weights, circuit.extra_weights, node_np, edge_np)
+        coeff_values = np.array([
+            float(circuit.extra_weights[circuit.extra_weights_IDX[f"coeff{j+1}"]])
+            for j in range(circuit.read_qubits)
+        ])
+        bias      = np.sum(np.abs(coeff_values))
         affine    = float(circuit.extra_weights[circuit.extra_weights_IDX["out_bias"]])
-        pred      = float(bias + affine - np.atleast_1d(np.array(raw_pred))[0])
+        raw_scalar = float(np.atleast_1d(np.array(raw_pred))[0])
+        pred      = float(bias + affine - raw_scalar)
 
         all_pred.append(pred)
         all_true.append(float(np.atleast_1d(target_np)[0]))
@@ -172,6 +201,7 @@ def main() -> None:
     circuit = QuantumCircuit(config, device)
     _load_weights(circuit, args.weights)
 
+    # DEBUG: inspect loaded weights before inference
     # ------------------------------------------------------------------
     # Inference
     # ------------------------------------------------------------------
